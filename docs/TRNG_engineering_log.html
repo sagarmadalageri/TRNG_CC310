@@ -1,0 +1,497 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Engineering Log — Hardware TRNG on the nRF52840</title>
+<style>
+  :root {
+    --ground:      #F6F7F6;
+    --surface:     #FFFFFF;
+    --surface-alt: #EEF1F0;
+    --ink:         #14181A;
+    --ink-soft:    #3C4548;
+    --muted:       #5F6A6D;
+    --rule:        #D9DEDD;
+    --accent:      #146E6B;
+    --accent-soft: #E2EFEE;
+    --pass:        #1F6F43;
+    --pass-bg:     #E3F0E8;
+    --fail:        #A33A2A;
+    --fail-bg:     #F6E5E1;
+    --warn:        #8A6314;
+    --warn-bg:     #F4EBD8;
+    --shadow:      0 1px 2px rgba(20, 24, 26, .06);
+
+    --f-display: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --f-body:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --f-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0F1315;
+      --surface:     #161B1D;
+      --surface-alt: #1D2426;
+      --ink:         #E7ECEA;
+      --ink-soft:    #C2CBC9;
+      --muted:       #8B9695;
+      --rule:        #2A3335;
+      --accent:      #57B3AC;
+      --accent-soft: #14302F;
+      --pass:        #6FC495;
+      --pass-bg:     #16301F;
+      --fail:        #E08A78;
+      --fail-bg:     #35201B;
+      --warn:        #D8B063;
+      --warn-bg:     #332914;
+      --shadow:      0 1px 2px rgba(0, 0, 0, .4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0F1315;
+    --surface:     #161B1D;
+    --surface-alt: #1D2426;
+    --ink:         #E7ECEA;
+    --ink-soft:    #C2CBC9;
+    --muted:       #8B9695;
+    --rule:        #2A3335;
+    --accent:      #57B3AC;
+    --accent-soft: #14302F;
+    --pass:        #6FC495;
+    --pass-bg:     #16301F;
+    --fail:        #E08A78;
+    --fail-bg:     #35201B;
+    --warn:        #D8B063;
+    --warn-bg:     #332914;
+    --shadow:      0 1px 2px rgba(0, 0, 0, .4);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 44rem; margin: 0 auto; }
+
+  .masthead { padding: 4rem 0 2rem; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.25rem;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: clamp(1.9rem, 5vw, 2.7rem);
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    text-wrap: balance;
+    margin: 0 0 .75rem;
+  }
+  .standfirst {
+    font-size: 1.08rem;
+    color: var(--ink-soft);
+    text-wrap: balance;
+    margin: 0 0 1.75rem;
+    max-width: 34rem;
+  }
+
+  .spec {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 2rem 0 0;
+  }
+  .spec div { background: var(--ground); padding: .8rem .9rem; }
+  .spec dt {
+    font-family: var(--f-mono);
+    font-size: .64rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 .3rem;
+  }
+  .spec dd { margin: 0; font-size: .9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  section { padding-top: 3.25rem; }
+  .label {
+    font-family: var(--f-mono);
+    font-size: .68rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  h3 { font-family: var(--f-body); font-weight: 650; font-size: 1rem; margin: 2rem 0 .5rem; }
+  p { margin: 0 0 1.1rem; }
+  a { color: var(--accent); }
+  strong { font-weight: 650; }
+  ul { margin: 0 0 1.1rem; padding-left: 1.15rem; }
+  li { margin-bottom: .45rem; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: .855em;
+    background: var(--surface-alt);
+    padding: .12em .35em;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: var(--f-mono);
+    font-size: .8rem;
+    line-height: 1.6;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: .9rem 1rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* failure record cards */
+  .rec {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    box-shadow: var(--shadow);
+    padding: 1.1rem 1.2rem;
+    margin: 0 0 1.1rem;
+  }
+  .rec-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    margin-bottom: .7rem;
+    padding-bottom: .6rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  .rec-head h3 { margin: 0; font-size: 1rem; }
+  .rec dl { margin: 0; display: grid; grid-template-columns: 6.5rem 1fr; gap: .45rem .9rem; }
+  .rec dt {
+    font-family: var(--f-mono);
+    font-size: .64rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: .18rem;
+  }
+  .rec dd { margin: 0; font-size: .92rem; }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--f-mono);
+    font-size: .62rem;
+    letter-spacing: .07em;
+    padding: .14rem .45rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  .pill.pass { background: var(--pass-bg); color: var(--pass); }
+  .pill.fail { background: var(--fail-bg); color: var(--fail); }
+  .pill.warn { background: var(--warn-bg); color: var(--warn); }
+
+  .tablewrap { overflow-x: auto; margin: 0 0 1.2rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+  caption {
+    text-align: left;
+    font-family: var(--f-mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: .5rem;
+  }
+  th, td { text-align: left; padding: .42rem .6rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: .66rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--ink);
+    font-weight: 600;
+  }
+  td.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 1.1rem 1.2rem;
+    margin: 0 0 1.3rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .label { color: var(--accent); }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-size: .82rem;
+    color: var(--muted);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  @media print {
+    body { background: #fff; color: #000; font-size: 10.5pt; padding: 0; }
+    .wrap { max-width: none; }
+    .masthead { padding-top: 0; }
+    section { padding-top: 1.6rem; }
+    h2, h3 { break-after: avoid-page; }
+    table, .rec, .callout, pre { break-inside: avoid; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+    a { color: #000; text-decoration: underline; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Engineering Log &middot; Methods &amp; Failure Analysis</p>
+    <h1>Every approach tried, what broke, and how each was resolved</h1>
+    <p class="standfirst">A companion record to the main report: the full path from a hung board on two SDKs to working CC310 entropy passing all thirteen NIST tests.</p>
+
+    <dl class="spec">
+      <div><dt>Toolchains tried</dt><dd>3</dd></div>
+      <div><dt>Entropy paths tried</dt><dd>4</dd></div>
+      <div><dt>Distinct defects</dt><dd>7</dd></div>
+      <div><dt>False conclusions</dt><dd>2</dd></div>
+      <div><dt>Final outcome</dt><dd>13 / 13 pass</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <p class="label">Overview</p>
+    <h2>Where the time went</h2>
+    <p>The objective was simple to state: get true random numbers out of the nRF52840's CryptoCell CC310 and prove statistically that they are random. The obstacle was that the CC310 hung on every attempt for a long stretch of the project, in a way that convincingly imitated broken silicon.</p>
+    <p>The root cause turned out to be a single missing initialisation call. Getting there involved eliminating three toolchains, four entropy paths, and a set of build and data-handling defects that had nothing to do with the chip. This document records all of them, including two occasions where the evidence was read wrongly.</p>
+  </section>
+
+  <section>
+    <p class="label">Summary</p>
+    <h2>Methods attempted</h2>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Approaches, in order</caption>
+        <thead>
+          <tr><th>Approach</th><th>Outcome</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>macOS + nRF Connect SDK 2.9.1</td><td><span class="pill fail">ABANDONED</span> flashing unreliable</td></tr>
+          <tr><td>Windows + NCS 3.4.0, Zephyr samples</td><td><span class="pill pass">WORKED</span> hello_world, blinky</td></tr>
+          <tr><td>CC310 via Zephyr PSA Crypto</td><td><span class="pill fail">HUNG</span></td></tr>
+          <tr><td>CC310 via raw <code>nrf_cc3xx_platform_entropy_get()</code></td><td><span class="pill fail">HUNG</span></td></tr>
+          <tr><td>Nordic's own unmodified <code>crypto/rng</code> sample</td><td><span class="pill fail">HUNG</span></td></tr>
+          <tr><td>NCS 2.9.1 cross-version check</td><td><span class="pill fail">HUNG</span></td></tr>
+          <tr><td>Arduino + SoftDevice RNG pool</td><td><span class="pill pass">WORKED</span></td></tr>
+          <tr><td>CC310 via Adafruit nRFCrypto, direct call</td><td><span class="pill fail">HUNG</span> missing init</td></tr>
+          <tr><td>CC310 via <code>nRFCrypto.begin()</code></td><td><span class="pill pass">WORKED</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Defect 01</p>
+    <h2>Build paths with spaces and across drives</h2>
+
+    <div class="rec">
+      <div class="rec-head"><h3>Zephyr build fails on the project path</h3><span class="pill pass">RESOLVED</span></div>
+      <dl>
+        <dt>Symptom</dt><dd><code>ValueError: path is on mount 'C:', start on mount 'E:'</code>, then <code>CMake Error: File not found: E:/IIIT</code>.</dd>
+        <dt>Cause</dt><dd>Two separate issues: <code>west</code> cannot compute a relative path between drives, and Zephyr's CMake scripts split the path <code>E:\IIIT Dharwad\TRNG</code> at the space.</dd>
+        <dt>Resolution</dt><dd>Build from a space-free directory on the same drive as the SDK. The same class of defect reappeared later with <code>arduino-cli</code>, fixed by relocating the toolchain and sketches to <code>E:\TRNG_arduino</code>.</dd>
+        <dt>Lesson</dt><dd>Embedded toolchains routinely mishandle spaces in paths. Keep build trees on short, space-free paths.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Defect 02</p>
+    <h2>The CC310 hang, and two wrong conclusions</h2>
+    <p>This was the central problem. The chip initialised successfully, then hung permanently on the first request for random bytes. No serial output, no USB enumeration, unrecoverable by reset.</p>
+
+    <h3>Hypotheses tested and eliminated</h3>
+    <div class="tablewrap">
+      <table>
+        <caption>Zephyr / NCS investigation</caption>
+        <thead>
+          <tr><th>Hypothesis</th><th>Test</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Bug in application code</td><td>Ran Nordic's unmodified <code>crypto/rng</code> sample</td><td>Same hang</td></tr>
+          <tr><td>Wrong PSA driver selected</td><td>Set <code>OBERON=n</code>, <code>CC3XX=y</code> per Nordic's own DK config</td><td>No change</td></tr>
+          <tr><td>IRQ handler never installed</td><td>Enabled <code>CONFIG_DYNAMIC_INTERRUPTS</code></td><td>No change</td></tr>
+          <tr><td>CTR_DRBG conditioning layer at fault</td><td>Called raw entropy API, bypassing DRBG</td><td>Same hang</td></tr>
+          <tr><td>Bootloader soft-jump leaves bad state</td><td>Full cold power-on reset</td><td>Same hang</td></tr>
+          <tr><td>SDK-version regression</td><td>Fresh NCS 2.9.1 install, separate toolchain</td><td>Same hang</td></tr>
+          <tr><td>Known silicon erratum</td><td>Checked nRF52840 Rev 2 errata sheet</td><td>No RNG entries</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Localising the hang without serial output</h3>
+    <p>With no console available, execution was traced using the on-board LED. <code>SYS_INIT</code> hooks were registered at specific initialisation priorities to bracket the CryptoCell driver's own init calls, with further markers inside <code>main()</code>. Each stage set a distinct colour, so the last colour shown identified the last line reached.</p>
+    <p>This established the sequence precisely: GPIO init &rarr; CryptoCell early init &rarr; CryptoCell post-kernel init &rarr; <code>psa_crypto_init()</code> &rarr; <strong>hang on first generate call</strong>.</p>
+
+    <div class="rec">
+      <div class="rec-head"><h3>First wrong conclusion</h3><span class="pill warn">MISDIAGNOSIS</span></div>
+      <dl>
+        <dt>Claim</dt><dd>"Hardware fault in the CC310 silicon."</dd>
+        <dt>Basis</dt><dd>Reproduced on two SDK versions with Nordic's own sample; no applicable errata.</dd>
+        <dt>Why wrong</dt><dd>The evidence genuinely excluded application bugs and SDK regressions, but never tested the assumption that the initialisation sequence itself was complete. Every path tried shared the same unexamined premise.</dd>
+      </dl>
+    </div>
+
+    <div class="rec">
+      <div class="rec-head"><h3>Second wrong conclusion</h3><span class="pill warn">MISDIAGNOSIS</span></div>
+      <dl>
+        <dt>Claim</dt><dd>"Confirmed across two independent software stacks, therefore hardware."</dd>
+        <dt>Basis</dt><dd>The Arduino/Adafruit path hung identically to Zephyr, seemingly independent corroboration.</dd>
+        <dt>Why wrong</dt><dd>Both stacks were misused in the same way. Agreement between two tests that share a hidden assumption is not independent confirmation.</dd>
+      </dl>
+    </div>
+
+    <div class="callout">
+      <p class="label">Actual root cause</p>
+      <p>The CryptoCell hardware must be powered up by <code>SaSi_LibInit()</code> before any <code>CRYS_*</code> call. The test code constructed an <code>nRFCrypto_Random</code> and called its <code>begin()</code> directly, which runs <code>CRYS_RndInit()</code> but never <code>SaSi_LibInit()</code>.</p>
+      <p><code>CRYS_RndInit()</code> performs software-only setup, so it reported <strong>success</strong> — then <code>CRYS_RND_GenerateVector()</code> blocked forever polling hardware that was never enabled.</p>
+      <p>Resolution: route through the library's top-level <code>nRFCrypto.begin()</code>, which performs both steps in the correct order. The CC310 produced output on the first attempt afterwards.</p>
+    </div>
+
+    <p><strong>How it was found:</strong> by reading the library's own <code>examples/random/random.ino</code> and comparing it against the code under test. That example uses <code>nRFCrypto.begin()</code>. The comparison took two minutes and should have been the first step, not one of the last.</p>
+  </section>
+
+  <section>
+    <p class="label">Defect 03</p>
+    <h2>Abstract class, silent at first glance</h2>
+    <div class="rec">
+      <div class="rec-head"><h3><code>CC310NoiseSource</code> would not compile</h3><span class="pill pass">RESOLVED</span></div>
+      <dl>
+        <dt>Symptom</dt><dd>Class rejected as abstract.</dd>
+        <dt>Cause</dt><dd><code>NoiseSource</code> declares two pure-virtual members, <code>stir()</code> and <code>calibrating()</code>. Only <code>stir()</code> had been overridden.</dd>
+        <dt>Resolution</dt><dd>Added a <code>calibrating()</code> override returning <code>false</code>: the CC310 is a certified DRBG that is either initialised or not, with no ring-oscillator warm-up period to wait out.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Defect 04</p>
+    <h2>Four-bit shift corrupting the captured stream</h2>
+    <div class="rec">
+      <div class="rec-head"><h3>Capture script stitched truncated lines</h3><span class="pill pass">RESOLVED</span></div>
+      <dl>
+        <dt>Symptom</dt><dd>Serial test returned <code>0.010283</code>, fractionally above the 0.01 pass threshold. Everything else passed comfortably.</dd>
+        <dt>Cause</dt><dd>On a truncated line the script kept the leftover hex character and prepended it to the next line, displacing every subsequent byte by four bits.</dd>
+        <dt>Why dangerous</dt><dd>Shifted random data still looks random. Nothing crashes, no error appears, and the file silently stops representing what the hardware produced.</dd>
+        <dt>Resolution</dt><dd>Truncated lines are discarded whole and counted. Losing one 128-byte chunk is preferable to corrupting every byte that follows. The same test then returned <code>0.028721</code>.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Defect 05</p>
+    <h2>USB buffer overflow from oversized writes</h2>
+    <div class="rec">
+      <div class="rec-head"><h3>Lines truncated during sustained streaming</h3><span class="pill warn">MITIGATED</span></div>
+      <dl>
+        <dt>Symptom</dt><dd>A 1 MB capture arrived 2,720 bytes short, with roughly one truncated line per 90,000 bytes.</dd>
+        <dt>Cause</dt><dd>256-byte chunks produce 513-character lines, which exceed the USB CDC transmit buffer in a single write.</dd>
+        <dt>Resolution</dt><dd>Reduced to 128-byte chunks. Occasional whole-line loss still occurs under sustained streaming; because lines are now decoded independently this costs samples without biasing them, and the capture script reports the count.</dd>
+        <dt>Status</dt><dd>Accepted rather than eliminated: for statistical testing, missing samples are harmless where corrupted samples would not be.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Defect 06</p>
+    <h2>Serial formatting as the throughput bottleneck</h2>
+    <div class="rec">
+      <div class="rec-head"><h3>Capture far slower than the hardware</h3><span class="pill pass">RESOLVED</span></div>
+      <dl>
+        <dt>Symptom</dt><dd>Transfers took far longer than the CC310's generation rate could explain.</dd>
+        <dt>Cause</dt><dd><code>Serial.print(byte, HEX)</code> invokes the formatting machinery once per byte — over a million calls per capture.</dd>
+        <dt>Resolution</dt><dd>Hex-encode via a 16-entry lookup table into a buffer, then issue one bulk <code>Serial.write()</code> per line. Roughly 1 MB now transfers in 18 seconds.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Defect 07</p>
+    <h2>A test suite that had to be trusted before use</h2>
+    <p>The SP&nbsp;800-22 implementation was written from scratch, which raises an obvious question: if the suite reports PASS, is that the data or a bug in the tests?</p>
+    <p>It was therefore run against four datasets with known expected outcomes before being applied to hardware output.</p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Suite validation</caption>
+        <thead><tr><th>Dataset</th><th>Expected</th><th>Observed</th></tr></thead>
+        <tbody>
+          <tr><td><code>os.urandom</code></td><td>Pass all</td><td>3 / 3 fresh samples clean</td></tr>
+          <tr><td>All-zero bytes</td><td>Fail nearly all</td><td>11 / 13 failed</td></tr>
+          <tr><td>70&#37;-biased bitstream</td><td>Fail nearly all</td><td>10 / 13 failed</td></tr>
+          <tr><td>Weak LCG</td><td>Fail spectral</td><td>8 / 13 failed, incl. DFT</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="rec">
+      <div class="rec-head"><h3>An apparent failure that was not one</h3><span class="pill pass">EXPLAINED</span></div>
+      <dl>
+        <dt>Symptom</dt><dd>The first <code>os.urandom</code> run failed two tests, though it should pass everything.</dd>
+        <dt>Investigation</dt><dd>Three freshly generated samples were tested. All three passed cleanly.</dd>
+        <dt>Explanation</dt><dd>The suite performs roughly forty comparisons at &alpha;&nbsp;=&nbsp;0.01, so a perfect source has close to a one-in-three chance of one spurious failure per run. This is the definition of &alpha;, not a defect.</dd>
+        <dt>Consequence</dt><dd>Single isolated failures are never treated as meaningful. Only repeated failures, or the same test failing across independent captures, are.</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section>
+    <p class="label">Scope decision</p>
+    <h2>Why the entropy pool version is not the evidence</h2>
+    <p>The CC310 was also wired into the Southern Storm <code>RNGClass</code> pool as a <code>NoiseSource</code>, which works and passes all thirteen tests. Those figures are nevertheless not cited as hardware results.</p>
+    <p><code>RNGClass</code> does not pass hardware bytes through: it folds them into a ChaCha20 state and returns keystream. A software stream cipher passes SP&nbsp;800-22 even when fed a poor entropy source, so testing its output measures ChaCha20 rather than the CryptoCell. All hardware figures come from raw <code>CRYS_RND</code> output.</p>
+  </section>
+
+  <section>
+    <p class="label">Takeaways</p>
+    <h2>What this cost, and what it taught</h2>
+    <ul>
+      <li><strong>Check the vendor's own working example first.</strong> The defect that consumed most of the project was visible in a two-minute comparison against <code>examples/random/random.ino</code>.</li>
+      <li><strong>A success return value is not proof of success.</strong> <code>CRYS_RndInit()</code> reported success while the hardware sat unpowered. An API that validates only its own arguments cannot vouch for the peripheral.</li>
+      <li><strong>Repeated agreement is not independent confirmation.</strong> Two stacks hung identically because both were misused identically.</li>
+      <li><strong>Prefer losing data to corrupting it.</strong> The nibble-carry bug produced output that looked correct and was not; dropping whole lines is visibly lossy and therefore safer.</li>
+      <li><strong>Validate the instrument before trusting the measurement.</strong> Running the suite against known-bad data is what makes its PASS verdict meaningful.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <p>Companion to the main technical report &middot; Seeed XIAO nRF52840 &middot; ARM CryptoCell-310 &middot; <a href="https://github.com/SudeepRD001/TRNG">github.com/SudeepRD001/TRNG</a></p>
+  </footer>
+
+</div>
+</body>
+</html>

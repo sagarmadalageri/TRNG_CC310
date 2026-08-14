@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hardware TRNG on the nRF52840 CryptoCell CC310</title>
+<style>
+  :root {
+    --ground:      #F6F7F6;
+    --surface:     #FFFFFF;
+    --surface-alt: #EEF1F0;
+    --ink:         #14181A;
+    --ink-soft:    #3C4548;
+    --muted:       #5F6A6D;
+    --rule:        #D9DEDD;
+    --accent:      #146E6B;
+    --accent-soft: #E2EFEE;
+    --pass:        #1F6F43;
+    --pass-bg:     #E3F0E8;
+    --fail:        #A33A2A;
+    --fail-bg:     #F6E5E1;
+    --shadow:      0 1px 2px rgba(20, 24, 26, .06);
+
+    --f-display: Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --f-body:    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --f-mono:    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0F1315;
+      --surface:     #161B1D;
+      --surface-alt: #1D2426;
+      --ink:         #E7ECEA;
+      --ink-soft:    #C2CBC9;
+      --muted:       #8B9695;
+      --rule:        #2A3335;
+      --accent:      #57B3AC;
+      --accent-soft: #14302F;
+      --pass:        #6FC495;
+      --pass-bg:     #16301F;
+      --fail:        #E08A78;
+      --fail-bg:     #35201B;
+      --shadow:      0 1px 2px rgba(0, 0, 0, .4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0F1315;
+    --surface:     #161B1D;
+    --surface-alt: #1D2426;
+    --ink:         #E7ECEA;
+    --ink-soft:    #C2CBC9;
+    --muted:       #8B9695;
+    --rule:        #2A3335;
+    --accent:      #57B3AC;
+    --accent-soft: #14302F;
+    --pass:        #6FC495;
+    --pass-bg:     #16301F;
+    --fail:        #E08A78;
+    --fail-bg:     #35201B;
+    --shadow:      0 1px 2px rgba(0, 0, 0, .4);
+  }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--f-body);
+    font-size: 16px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 44rem; margin: 0 auto; }
+
+  /* ---------- masthead ---------- */
+  .masthead { padding: 4rem 0 2rem; border-bottom: 2px solid var(--ink); }
+  .eyebrow {
+    font-family: var(--f-mono);
+    font-size: .7rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.25rem;
+  }
+  h1 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: clamp(1.9rem, 5vw, 2.7rem);
+    line-height: 1.15;
+    letter-spacing: -.01em;
+    text-wrap: balance;
+    margin: 0 0 .75rem;
+  }
+  .standfirst {
+    font-size: 1.08rem;
+    color: var(--ink-soft);
+    text-wrap: balance;
+    margin: 0 0 1.75rem;
+    max-width: 34rem;
+  }
+
+  /* ---------- spec sheet ---------- */
+  .spec {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 2rem 0 0;
+  }
+  .spec div { background: var(--ground); padding: .8rem .9rem; }
+  .spec dt {
+    font-family: var(--f-mono);
+    font-size: .64rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 .3rem;
+  }
+  .spec dd {
+    margin: 0;
+    font-size: .9rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- sections ---------- */
+  section { padding-top: 3.25rem; }
+  .label {
+    font-family: var(--f-mono);
+    font-size: .68rem;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 .5rem;
+  }
+  h2 {
+    font-family: var(--f-display);
+    font-weight: 600;
+    font-size: 1.5rem;
+    line-height: 1.25;
+    text-wrap: balance;
+    margin: 0 0 1rem;
+  }
+  h3 {
+    font-family: var(--f-body);
+    font-weight: 650;
+    font-size: 1rem;
+    margin: 2rem 0 .5rem;
+  }
+  p { margin: 0 0 1.1rem; }
+  a { color: var(--accent); }
+  strong { font-weight: 650; }
+
+  ul { margin: 0 0 1.1rem; padding-left: 1.15rem; }
+  li { margin-bottom: .45rem; }
+
+  code {
+    font-family: var(--f-mono);
+    font-size: .855em;
+    background: var(--surface-alt);
+    padding: .12em .35em;
+    border-radius: 3px;
+  }
+  pre {
+    font-family: var(--f-mono);
+    font-size: .8rem;
+    line-height: 1.6;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--accent);
+    padding: .9rem 1rem;
+    overflow-x: auto;
+    margin: 0 0 1.2rem;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+
+  /* ---------- pipeline ---------- */
+  .stages { display: flex; flex-direction: column; gap: .6rem; margin: 0 0 1.4rem; }
+  .stage {
+    display: grid;
+    grid-template-columns: 2rem 1fr;
+    gap: .9rem;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: .9rem 1rem;
+    box-shadow: var(--shadow);
+  }
+  .stage .n {
+    font-family: var(--f-mono);
+    font-size: .8rem;
+    font-weight: 700;
+    color: var(--accent);
+    padding-top: .1rem;
+  }
+  .stage h4 { margin: 0 0 .2rem; font-size: .95rem; font-weight: 650; }
+  .stage p { margin: 0; font-size: .9rem; color: var(--ink-soft); }
+
+  /* ---------- callout ---------- */
+  .callout {
+    background: var(--accent-soft);
+    border-left: 3px solid var(--accent);
+    padding: 1.1rem 1.2rem;
+    margin: 0 0 1.3rem;
+  }
+  .callout p:last-child { margin-bottom: 0; }
+  .callout .label { color: var(--accent); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; margin: 0 0 1rem; }
+  table { border-collapse: collapse; width: 100%; font-size: .875rem; }
+  caption {
+    text-align: left;
+    font-family: var(--f-mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: .5rem;
+  }
+  th, td {
+    text-align: left;
+    padding: .42rem .6rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  thead th {
+    font-family: var(--f-mono);
+    font-size: .66rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 1px solid var(--ink);
+    font-weight: 600;
+  }
+  td.num {
+    font-family: var(--f-mono);
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .pill {
+    display: inline-block;
+    font-family: var(--f-mono);
+    font-size: .66rem;
+    letter-spacing: .07em;
+    padding: .12rem .45rem;
+    border-radius: 2px;
+  }
+  .pill.pass { background: var(--pass-bg); color: var(--pass); }
+  .pill.fail { background: var(--fail-bg); color: var(--fail); }
+
+  .verdict {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 1rem;
+    background: var(--surface-alt);
+    padding: .7rem 1rem;
+    margin: 0 0 2rem;
+    font-size: .875rem;
+  }
+  .verdict b { font-family: var(--f-mono); color: var(--pass); letter-spacing: .05em; }
+
+  footer {
+    margin-top: 4rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-size: .82rem;
+    color: var(--muted);
+  }
+
+  a:focus-visible, :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- print / PDF ---------- */
+  @media print {
+    body { background: #fff; color: #000; font-size: 10.5pt; padding: 0; }
+    .wrap { max-width: none; }
+    .masthead { padding-top: 0; }
+    section { padding-top: 1.6rem; break-inside: avoid-page; }
+    h2, h3 { break-after: avoid-page; }
+    table, .stage, .callout, .verdict, pre { break-inside: avoid; }
+    pre { white-space: pre-wrap; word-break: break-word; }
+    a { color: #000; text-decoration: underline; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Technical Report &middot; Hardware Entropy</p>
+    <h1>True Random Number Generation on the nRF52840 CryptoCell CC310</h1>
+    <p class="standfirst">Extracting hardware entropy from an ARM CryptoCell-310 on a Seeed XIAO nRF52840, and validating it against the NIST SP&nbsp;800-22 statistical test suite.</p>
+
+    <dl class="spec">
+      <div><dt>Board</dt><dd>XIAO nRF52840</dd></div>
+      <div><dt>Entropy source</dt><dd>CryptoCell CC310</dd></div>
+      <div><dt>Interface</dt><dd>CRYS_RND</dd></div>
+      <div><dt>Largest sample</dt><dd>7,948,288 bits</dd></div>
+      <div><dt>Tests passed</dt><dd>13 / 13</dd></div>
+      <div><dt>Transfer rate</dt><dd>~1 MB / 18 s</dd></div>
+    </dl>
+  </header>
+
+  <section>
+    <p class="label">Summary</p>
+    <h2>What was built</h2>
+    <p>A complete pipeline that pulls true random numbers from the nRF52840's dedicated hardware crypto block, transfers them to a PC, and subjects them to the full NIST SP&nbsp;800-22 battery. Every test passes on genuine CC310 output.</p>
+    <p>The work also produced an independent, from-scratch implementation of the SP&nbsp;800-22 suite in Python, which was itself validated against known-good and known-bad reference data before being trusted on hardware output.</p>
+  </section>
+
+  <section>
+    <p class="label">Background</p>
+    <h2>Why this is a <em>true</em> RNG</h2>
+    <p>Ordinary software random number generators are deterministic: given the same starting seed, they replay the same sequence forever. That is fine for simulations and fatal for cryptography.</p>
+    <p>The nRF52840 carries a dedicated hardware security block, the <strong>ARM CryptoCell-310</strong>. Inside it, a ring-oscillator circuit harvests genuine physical noise — thermal and electrical fluctuation in the silicon itself — that no algorithm can predict or reproduce.</p>
+    <p>That raw noise feeds a <strong>CTR_DRBG</strong>, a deterministic generator standardised in NIST SP&nbsp;800-90A, which is continuously reseeded from the physical source. This is the conventional, certified architecture: raw entropy is almost never handed out directly, because a conditioning stage removes bias while the hardware reseeding preserves genuine unpredictability.</p>
+  </section>
+
+  <section>
+    <p class="label">Architecture</p>
+    <h2>The three-stage pipeline</h2>
+
+    <div class="stages">
+      <div class="stage">
+        <div class="n">01</div>
+        <div>
+          <h4>Generate — on the microcontroller</h4>
+          <p>An Arduino sketch initialises the CryptoCell and requests random bytes in 128-byte blocks via the <code>CRYS_RND</code> API.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="n">02</div>
+        <div>
+          <h4>Transfer — over USB serial</h4>
+          <p>Bytes are hex-encoded and streamed as newline-delimited lines between <code># BEGIN</code> and <code># END</code> markers. A Python script decodes them back into a raw binary file.</p>
+        </div>
+      </div>
+      <div class="stage">
+        <div class="n">03</div>
+        <div>
+          <h4>Test — on the PC</h4>
+          <p>The binary file is run through all thirteen SP&nbsp;800-22 tests, producing a p-value and verdict for each.</p>
+        </div>
+      </div>
+    </div>
+
+    <h3>Why hex instead of raw binary</h3>
+    <p>Raw bytes would halve the transfer size, but a stray <code>0x0A</code> byte is indistinguishable from a newline, and any framing glitch would silently corrupt everything downstream. Hex encoding is self-delimiting: each line stands alone and decodes independently.</p>
+  </section>
+
+  <section>
+    <p class="label">Root cause</p>
+    <h2>The initialisation order that cost days</h2>
+    <p>The CC310 refused to produce output for a long stretch of this project. Every attempt behaved identically: initialisation reported success, then the first request for random bytes hung forever. No serial output, no USB enumeration, unrecoverable by reset — indistinguishable from dead silicon.</p>
+
+    <div class="callout">
+      <p class="label">The bug</p>
+      <p>The CryptoCell hardware must be powered up with <code>SaSi_LibInit()</code> <em>before</em> any <code>CRYS_*</code> call. Code that constructs an <code>nRFCrypto_Random</code> and calls its <code>begin()</code> directly skips that step.</p>
+      <p><code>CRYS_RndInit()</code> performs only software-side setup, so it returns <strong>success regardless</strong> — then <code>CRYS_RND_GenerateVector()</code> blocks forever, polling hardware that was never switched on.</p>
+    </div>
+
+    <p>The correct entry point does both steps in order:</p>
+<pre><code>nRFCrypto.begin()
+   ├── SaSi_LibInit()    // powers up the CryptoCell hardware
+   └── CRYS_RndInit()    // then initialises the RNG engine
+
+nRFCrypto.Random.generate(buf, n)
+   └── CRYS_RND_GenerateVector()</code></pre>
+    <p>The failure mode is worth recording because it mimics a hardware fault so convincingly. A silent success followed by an unrecoverable hang is a far more misleading signal than an error code would have been.</p>
+  </section>
+
+  <section>
+    <p class="label">Data integrity</p>
+    <h2>A silent corruption in the capture path</h2>
+    <p>The original capture script, on encountering a truncated line, carried the leftover half-byte onto the following line. That shifted every subsequent byte by four bits.</p>
+    <p>This is the most dangerous class of bug in a project like this: shifted random data still <em>looks</em> perfectly random, so nothing visibly breaks — but the file no longer represents what the chip produced. It surfaced only as the Serial test sitting at <code>0.010283</code>, fractionally above the 0.01 pass threshold.</p>
+    <p>Truncated lines are now discarded whole and counted. The same test then returned <code>0.028721</code>, comfortably clear. Every byte in the final datasets is byte-aligned and exactly as generated.</p>
+  </section>
+
+  <section>
+    <p class="label">Methodology</p>
+    <h2>Validating the test suite itself</h2>
+    <p>A test suite that reports PASS on everything is worthless. Before trusting it on hardware output, the implementation was run against four reference datasets with known expected outcomes.</p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Suite validation against reference data</caption>
+        <thead>
+          <tr><th>Dataset</th><th>Expected</th><th>Observed</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>os.urandom</code></td><td>Pass all</td><td>3 / 3 fresh samples clean</td></tr>
+          <tr><td>All-zero bytes</td><td>Fail nearly all</td><td>11 / 13 failed</td></tr>
+          <tr><td>70&#37;-biased bitstream</td><td>Fail nearly all</td><td>10 / 13 failed</td></tr>
+          <tr><td>Weak LCG</td><td>Fail spectral</td><td>8 / 13 failed, incl. DFT</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>The suite discriminates correctly, so its verdict on real hardware output can be trusted.</p>
+  </section>
+
+  <section>
+    <p class="label">Results</p>
+    <h2>CC310 hardware output</h2>
+    <p>993,536 bytes — 7,948,288 bits — of raw <code>CRYS_RND</code> output, captured in approximately 18 seconds.</p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>NIST SP 800-22 &middot; raw CC310 &middot; &alpha; = 0.01</caption>
+        <thead>
+          <tr><th>Test</th><th style="text-align:right">p-value</th><th>Result</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Frequency (Monobit)</td><td class="num">0.505782</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Block Frequency</td><td class="num">0.476197</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Runs</td><td class="num">0.127776</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Longest Run of Ones</td><td class="num">0.188890</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Binary Matrix Rank</td><td class="num">0.125504</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Discrete Fourier Transform</td><td class="num">0.919110</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Non-overlapping Template</td><td class="num">0.805184</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Maurer's Universal</td><td class="num">0.584228</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Serial</td><td class="num">0.028721</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Approximate Entropy</td><td class="num">0.882174</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Cumulative Sums</td><td class="num">0.430308</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Random Excursions</td><td class="num">0.024265</td><td><span class="pill pass">PASS</span></td></tr>
+          <tr><td>Random Excursions Variant</td><td class="num">0.074681</td><td><span class="pill pass">PASS</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="verdict"><span>Overall verdict</span> <b>PASS &mdash; 13 / 13</b></div>
+
+    <h3>Independent confirmation</h3>
+    <p>A separate 250,000-byte capture, taken from a fresh reset, also passed all thirteen tests — worst p-value <code>0.219608</code>. Reproducibility across independent captures matters more than any single run.</p>
+  </section>
+
+  <section>
+    <p class="label">Interpretation</p>
+    <h2>How to read a p-value here</h2>
+    <p>A p-value of <strong>0.01 or above passes</strong>. It is emphatically <em>not</em> a quality score: 0.02 and 0.98 are equally good results. It expresses the probability of observing data this unusual if the source were genuinely random.</p>
+    <p>Because the suite performs roughly forty individual comparisons at &alpha;&nbsp;=&nbsp;0.01, a perfect source still has close to a <strong>one-in-three chance of one spurious failure per run</strong>. That is what &alpha;&nbsp;=&nbsp;0.01 means, not evidence of a defect.</p>
+    <p>The correct response to a single isolated failure is to recapture and re-run. Repeated failures, or the same test failing across independent captures, is the signal that matters.</p>
+  </section>
+
+  <section>
+    <p class="label">Scope note</p>
+    <h2>Which figures describe the hardware</h2>
+    <p>Two firmware variants exist. The distinction is important when citing results.</p>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Firmware variants</caption>
+        <thead>
+          <tr><th>Sketch</th><th>Streams</th><th>Use for</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><code>cc310_capture</code></td><td>Raw CC310 output</td><td><strong>Hardware evidence</strong></td></tr>
+          <tr><td><code>cc310_rngclass</code></td><td>CC310 &rarr; ChaCha20 pool</td><td>Integration demo</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p>The second variant wires the CC310 into a software entropy pool as a noise source. It works and passes all thirteen tests, but that result describes <strong>ChaCha20, not the CryptoCell</strong>: a software stream cipher passes SP&nbsp;800-22 even when fed a poor entropy source, so it cannot serve as evidence about hardware quality.</p>
+    <p>All hardware figures in this report come from raw <code>CRYS_RND</code> output.</p>
+  </section>
+
+  <section>
+    <p class="label">Reproduce</p>
+    <h2>Running it yourself</h2>
+    <p>Flash <code>cc310_capture.ino</code> to the board, then:</p>
+<pre><code>pip install pyserial numpy scipy
+
+python capture_trng.py --port COM16 --out random.bin --bytes 1000000
+python sp800_22.py random.bin</code></pre>
+    <p>Source, datasets and full results: <a href="https://github.com/SudeepRD001/TRNG">github.com/SudeepRD001/TRNG</a></p>
+  </section>
+
+  <footer>
+    <p>Seeed XIAO nRF52840 &middot; ARM CryptoCell-310 &middot; Seeed nRF52 Arduino core 1.1.13 &middot; NIST SP&nbsp;800-22 Rev.&nbsp;1a</p>
+  </footer>
+
+</div>
+</body>
+</html>

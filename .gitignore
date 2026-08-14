@@ -1,0 +1,15 @@
+# Generated/captured data - reproducible via make_reference_data.py and
+# capture_trng.py, not tracked to keep the repo small.
+*.bin
+
+# Build artifacts
+build/
+.pio/
+
+# Python
+__pycache__/
+*.pyc
+
+# Editor/tool metadata
+.claude/
+.vscode/
