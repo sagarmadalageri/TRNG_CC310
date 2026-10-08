@@ -13,3 +13,25 @@ __pycache__/
 # Editor/tool metadata
 .claude/
 .vscode/
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Environment / secrets
+.env
+
+# Generated data
+*.bin
+*.log
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+
+# IDE
+.vscode/
+.idea/

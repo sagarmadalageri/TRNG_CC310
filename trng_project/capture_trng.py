@@ -1,99 +1,182 @@
 #!/usr/bin/env python3
-"""Capture hex-encoded hardware RNG bytes from cc310_capture.ino over serial,
-decode to raw binary, and save for NIST SP800-22 testing.
+"""
+Capture RAW binary CC310 hardware TRNG bytes over serial
+and save them directly to a binary file.
+
+The Arduino firmware waits for the host to send 'S'.
+After receiving 'S', the board starts generating raw
+random bytes.
 
 Usage:
-    python capture_trng.py --port COM16 --out random.bin --bytes 1000000
+    python capture_trng.py --port /dev/cu.usbmodem1101 --out random.bin --bytes 250000
 """
 
 import argparse
 import sys
+import time
 
 import serial
 
 
 def open_port(port: str, baud: int) -> serial.Serial:
     try:
-        return serial.Serial(port, baud, timeout=5)
+        return serial.Serial(
+            port,
+            baud,
+            timeout=1
+        )
+
     except serial.SerialException as exc:
-        msg = str(exc)
         print(f"ERROR: could not open {port}: {exc}")
-        if "denied" in msg.lower() or "PermissionError" in msg:
+
+        if "busy" in str(exc).lower():
             print(
-                "That port looks locked by another program - close the Arduino "
-                "IDE's Serial Monitor (or any other terminal holding the port) "
-                "and try again."
+                "The serial port is busy. "
+                "Close Arduino Serial Monitor or any other "
+                "program using the board."
             )
+
         sys.exit(1)
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", required=True, help="Serial port, e.g. COM12")
-    parser.add_argument("--out", required=True, help="Output raw binary file")
-    parser.add_argument("--baud", type=int, default=115200)
-    parser.add_argument(
-        "--bytes", type=int, default=250_000, help="Number of raw bytes to capture"
+
+    # --------------------------------------------------------
+    # Command-line arguments
+    # --------------------------------------------------------
+
+    parser = argparse.ArgumentParser(
+        description=__doc__
     )
+
+    parser.add_argument(
+        "--port",
+        required=True,
+        help="Serial port"
+    )
+
+    parser.add_argument(
+        "--out",
+        required=True,
+        help="Output raw binary file"
+    )
+
+    parser.add_argument(
+        "--baud",
+        type=int,
+        default=115200,
+        help="Serial baud rate"
+    )
+
+    parser.add_argument(
+        "--bytes",
+        type=int,
+        default=250_000,
+        help="Number of raw bytes to capture"
+    )
+
     args = parser.parse_args()
 
-    ser = open_port(args.port, args.baud)
+    # --------------------------------------------------------
+    # Open serial port
+    # --------------------------------------------------------
+
+    ser = open_port(
+        args.port,
+        args.baud
+    )
+
     written = 0
-    dropped = 0  # lines discarded as truncated/corrupted (reported at the end)
 
-    with ser, open(args.out, "wb") as out:
-        print("Waiting for '# BEGIN' ... (press the board's reset button now if nothing happens)")
-        while True:
-            line = ser.readline()
-            if not line:
-                continue
-            if b"# BEGIN" in line:
-                break
+    try:
 
-        print(f"Capturing up to {args.bytes} bytes to {args.out} ...")
-        while written < args.bytes:
-            raw = ser.readline()
-            if not raw:
-                continue  # read timeout, just keep waiting
+        # ----------------------------------------------------
+        # Allow USB serial connection to settle
+        # ----------------------------------------------------
 
-            text = raw.decode("ascii", errors="ignore").strip()
-            if not text:
-                continue
-            if text.startswith("#"):
-                if "END" in text:
-                    break
-                continue  # other banner/comment line
+        time.sleep(1)
 
-            # Each line is one self-contained chunk of hex. A truncated line is
-            # dropped whole rather than being stitched to its neighbour: carrying
-            # a leftover nibble across lines would shift every subsequent byte by
-            # 4 bits, silently corrupting the stream instead of losing one chunk.
-            if len(text) % 2 != 0:
-                dropped += 1
-                continue
+        # ----------------------------------------------------
+        # Clear old data
+        # ----------------------------------------------------
 
-            try:
-                chunk = bytes.fromhex(text)
-            except ValueError:
-                dropped += 1
-                continue  # a corrupted line - drop it rather than crash
+        ser.reset_input_buffer()
 
-            remaining = args.bytes - written
-            if len(chunk) > remaining:
-                chunk = chunk[:remaining]
-            out.write(chunk)
-            written += len(chunk)
-            print(f"\r{written}/{args.bytes} bytes", end="", flush=True)
+        # ----------------------------------------------------
+        # Tell Arduino to START
+        # Arduino firmware waits for character 'S'
+        # ----------------------------------------------------
 
-    print(f"\nDone. Wrote {written} bytes to {args.out}")
-    if dropped:
+        print("Sending START command to CC310...")
+
+        ser.write(b"S")
+        ser.flush()
+
         print(
-            f"WARNING: dropped {dropped} truncated/corrupted line(s). The data "
-            f"written is byte-aligned and valid, but is short of the requested "
-            f"{args.bytes} bytes. Lower CHUNK_BYTES in the sketch if this "
-            f"happens often."
+            f"Capturing {args.bytes:,} raw bytes..."
         )
+
+        # ----------------------------------------------------
+        # Open output file in binary mode
+        # ----------------------------------------------------
+
+        with open(args.out, "wb") as out:
+
+            while written < args.bytes:
+
+                remaining = (
+                    args.bytes - written
+                )
+
+                # Read only the amount still required
+                chunk = ser.read(
+                    min(4096, remaining)
+                )
+
+                # No data received yet
+                if not chunk:
+                    continue
+
+                # Write RAW bytes directly
+                out.write(chunk)
+
+                written += len(chunk)
+
+                # Display progress
+                print(
+                    f"\rCaptured "
+                    f"{written:,}/{args.bytes:,} bytes",
+                    end="",
+                    flush=True
+                )
+
+    except KeyboardInterrupt:
+
+        print(
+            "\nCapture stopped by user."
+        )
+
+    except serial.SerialException as exc:
+
+        print(
+            f"\nERROR: serial communication failed: {exc}"
+        )
+
+        sys.exit(1)
+
+    finally:
+
+        ser.close()
+
+    # --------------------------------------------------------
+    # Final result
+    # --------------------------------------------------------
+
+    print(
+        f"\nDone. Wrote {written:,} bytes "
+        f"to {args.out}"
+    )
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
